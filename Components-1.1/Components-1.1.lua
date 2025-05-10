@@ -7,8 +7,8 @@
     Dependencies: AceLibrary, AceEvent-2.0
 ]]
 
-local vmajor, vminor = "Components-1.0", "$Revision: 0 $";
-local pathMatchingPattern = "\\(.+)\\Components%-1%.0\\Components%-1%.0%.lua";
+local vmajor, vminor = "Components-1.1", "$Revision: 20250510 $";
+local pathMatchingPattern = "\\(.+)\\Components%-1%.1\\Components%-1%.1%.lua";
 
 if not AceLibrary then error(vmajor .. " requires AceLibrary"); end
 if not AceLibrary:IsNewVersion(vmajor, vminor) then return; end
@@ -28,6 +28,9 @@ local FrameFactory = {
     currentIndex = 0
 };
 local ButtonFactory = {
+    currentIndex = 0
+};
+local ComboBoxFactory = {
     currentIndex = 0
 };
 local SimpleHtmlFactory = {
@@ -51,6 +54,9 @@ setmetatable(Frame, { __index = FrameBased });
 local Button = {};
 setmetatable(Button, { __index = FrameBased });
 
+local ComboBox = {};
+setmetatable(ComboBox, { __index = FrameBased });
+
 local SimpleHtml = {};
 setmetatable(SimpleHtml, { __index = FrameBased });
 
@@ -59,6 +65,7 @@ local Components = {
     Label = LabelFactory,
     Frame = FrameFactory,
     Button = ButtonFactory,
+    ComboBox = ComboBoxFactory,
     SimpleHtml = SimpleHtmlFactory
 };
 
@@ -86,6 +93,7 @@ local function safeWrappedComponent(componentOrUiObject)
     if not type(componentOrUiObject) == "table" then error("componentOrUiObject is not a table"); end
     if componentOrUiObject.wrappedComponent then return componentOrUiObject.wrappedComponent; end
     if componentOrUiObject.GetID then return componentOrUiObject; end
+    if componentOrUiObject.GetStringWidth then return componentOrUiObject; end
     error("componentOrUiObject is not a valid component or UI object");
 end
 
@@ -129,7 +137,7 @@ local function handleComponentFadeOut(eventId, component, startAlpha, startTime,
 
     local percentage = 1 - (timeSinceStart / fadeDuration);
     local alpha = startAlpha * percentage;
-   
+
     if alpha <= 0 then
         component:hide();
         component:setAlpha(1);
@@ -161,8 +169,13 @@ function Component:getId()
 end
 
 function Component:getPosition()
-    
-    return self.wrappedComponent:GetLeft(), self.wrappedComponent:GetBottom();
+
+    local parent = self.wrappedComponent:GetParent();
+    if parent then
+        return self.wrappedComponent:GetLeft() - parent:GetLeft(), self.wrappedComponent:GetBottom() - parent:GetBottom();
+    else
+        return self.wrappedComponent:GetLeft(), self.wrappedComponent:GetBottom();
+    end
 end
 
 function Component:getSize()
@@ -190,12 +203,17 @@ function Component:isVisible()
     return self.wrappedComponent:IsVisible();
 end
 
-function Component:setPosition(left, top)
+function Component:setPosition(left, bottom)
 
-    self:setRelativePosition("BOTTOMLEFT", nil, left, top);
+    self:setPoint("BOTTOMLEFT", nil, "BOTTOMLEFT", left, bottom);
 end
 
 function Component:setRelativePosition(point, relativeTo, offsetX, offsetY)
+
+    self:setPoint(point, relativeTo, point, offsetX, offsetY);
+end
+
+function Component:setPoint(point, relativeTo, relativePoint, offsetX, offsetY)
 
     local relativeFrame;
     if relativeTo then
@@ -205,13 +223,13 @@ function Component:setRelativePosition(point, relativeTo, offsetX, offsetY)
     end
 
     self.wrappedComponent:ClearAllPoints();
-    self.wrappedComponent:SetPoint(point, relativeFrame, point, offsetX, offsetY);
+    self.wrappedComponent:SetPoint(point, relativeFrame, relativePoint, offsetX, offsetY);
 end
 
 function Component:setSize(width, height)
 
-    self.wrappedComponent:SetWidth(width);
-    self.wrappedComponent:SetHeight(height);
+    self:setWidth(width);
+    self:setHeight(height);
 end
 
 function Component:setWidth(width)
@@ -549,6 +567,106 @@ function Button:setHighlightTextureByPath(texturePath, rightCut, bottomCut)
     local texture = loadTexture(self, texturePath, "OVERLAY", rightCut, bottomCut);
     texture:SetBlendMode("ADD");
     self.wrappedComponent:SetHighlightTexture(texture);
+end
+
+-------------------------------------
+-----     ComboxBox Factory     -----
+-------------------------------------
+
+function ComboBoxFactory:new(parent, values)
+
+    if not values or (type(values) ~= "table") then
+        error("ComboBox cannot be created because no value table was passed to the method");
+    end
+
+    local id = "ComboBox" .. ComboBoxFactory.currentIndex;
+    ComboBoxFactory.currentIndex = ComboBoxFactory.currentIndex + 1;
+    local comboBox = constructInstance(ComboBox, id, CreateFrame("Frame", id, safeWrappedComponent(parent), "UIDropDownMenuTemplate"));
+    comboBox:setRelativePosition("CENTER");
+    comboBox:setSize(100, 25);
+
+    UIDropDownMenu_Initialize(comboBox.wrappedComponent, function()
+
+        local info = {};
+        for k, v in pairs(values) do
+
+            info.value = k;
+            info.text = v;
+            info.owner = comboBox.wrappedComponent;
+            info.checked = nil;
+            info.func = function()
+
+                local id = this:GetID();
+                comboBox.selectedValue = this.value;
+                UIDropDownMenu_SetSelectedID(comboBox.wrappedComponent, id);
+                if comboBox.onSelectFunction then
+                    comboBox.onSelectFunction(comboBox, this.value, id);
+                end
+            end
+
+            UIDropDownMenu_AddButton(info);
+        end
+    end);
+
+    getglobal(id.."Button"):SetScript("OnClick", function()
+        comboBox:toggle();
+    end);
+
+    return comboBox;
+end
+
+-------------------------------------
+-----         ComboxBox         -----
+-------------------------------------
+
+function ComboBox:__init__(id, wrappedComponent)
+
+    self:__framebased__(id, wrappedComponent);
+
+    self.initialized = false;
+    self.selectedValue = nil;
+    self.onSelectFunction = nil;
+end
+
+function ComboBox:getSelectedValue()
+
+    return self.selectedValue;
+end
+
+function ComboBox:setWidth(width)
+
+    UIDropDownMenu_SetWidth(width, self.wrappedComponent);
+end
+
+function ComboBox:setSelectedValue(value)
+
+    self.selectedValue = value;
+    UIDropDownMenu_SetSelectedValue(self.wrappedComponent, value);
+end
+
+function ComboBox:toggle()
+
+    if self.initialized then
+        ToggleDropDownMenu(1, nil, self.wrappedComponent);
+    else
+        -- hack against the growing of the dropdown menu and the repositioning of the button
+        local left, bottom = self:getPosition();
+        local _, heightBefore = self:getSize();
+
+        ToggleDropDownMenu(1, nil, self.wrappedComponent);
+
+        local _, heightAfter = self:getSize();
+
+        if heightAfter > heightBefore then
+            self:setPosition(left, bottom - (heightAfter - heightBefore));
+            self.initialized = true;
+        end
+    end
+end;
+
+function ComboBox:onSelect(onSelectFunction)
+
+    self.onSelectFunction = onSelectFunction;
 end
 
 -------------------------------------
